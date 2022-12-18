@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: demo-app-1-0-0
+  name: demo-app-${LABEL_VERSION}
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: demo-app
-      version: 1-0-0
+      version: ${LABEL_VERSION}
   template:
     metadata:
       labels:
         app: demo-app
-        version: 1-0-0
+        version: ${LABEL_VERSION}
     spec:
       containers:
       - name: demo-app
-        image: hoangga1233/udacity-capstone:1.0.0
+        image: ${DOCKER_IMAGE}
         ports:
         - containerPort: 80
