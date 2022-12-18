@@ -119,20 +119,71 @@ jobs:
             echo "DOCKER_IMAGE: $DOCKER_IMAGE"
             echo "LABEL_VERSION: $LABEL_VERSION"
             
-            envsubst < k8s/deployment.yaml | kubectl apply --filename -
+            envsubst < kubec/deployment.yaml | kubectl apply --filename -
             
-            # Creates the flask-app-green service
+            # Creates the demo-app-green service
             export APP_NAME=demo-app-green
             echo "APP_NAME: $APP_NAME"
 
-            envsubst < k8s/service.yaml | kubectl apply --filename -
+            envsubst < kubec/service.yaml | kubectl apply --filename -
             sleep 3
             LOAD_BALANCER=$(kubectl get services \
               demo-app-green \
               --output jsonpath='{.status.loadBalancer.ingress[0].hostname}')
             echo "LOAD_BALANCER: $LOAD_BALANCER"
 
+  deploy-blue-env:
+    docker:
+      - image: cimg/python:3.7.13
+    steps:
+      - checkout
+      - setup-environment
+      - run:
+          name: Create kubectconfig to connect AWS EKS Cluster
+          command: |
+            aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME
+      - run:
+          name: Target new version — new blue
+          command: |
+            export VERSION=$(<public)
+            export LABEL_VERSION=${VERSION//./-}
+            echo "LABEL_VERSION: $LABEL_VERSION"
+            export APP_NAME=demo-app
+            echo "APP_NAME: $APP_NAME"
+            # demo-app service target now labeled new version
+            envsubst < kubec/service.yaml | kubectl apply --filename -
 
+  remove-old-env:
+    docker:
+      - image: cimg/python:3.7.13
+    steps:
+      - checkout
+      - setup-environment
+      - run:
+          name: Create kubectconfig to connect AWS EKS Cluster
+          command: |
+            aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME
+      - run:
+          name: Remove the old version demo-app
+          command: |
+            export VERSION=$(<public)
+            export LABEL_VERSION=${VERSION//./-}
+            echo "LABEL_VERSION: $LABEL_VERSION"
+            
+            # Remove the demo-app-x-x deployment
+            for deploy in $(kubectl get deployments -o jsonpath="{.items[*].metadata.name}" | grep demo-app);
+            do
+              if [[ $deploy != demo-app-$LABEL_VERSION ]];
+              then
+                kubectl delete deployments $deploy
+              fi
+            done
+            
+            # Remove the demo-app-green service
+            if kubectl get services | grep demo-app-green;
+            then
+              kubectl delete services demo-app-green
+            fi
 
 workflows:
   default:
@@ -140,3 +191,12 @@ workflows:
       - setup-linting
       - build-push-docker-image:
           requires: [setup-linting]
+      - deploy-green-env:
+          requires: [build-push-docker-image]
+      - hold:
+          type: approval
+          requires: [deploy-green-env]
+      - deploy-blue-env:
+          requires: [hold]
+      - remove-old-env:
+          requires: [deploy-blue-env]
